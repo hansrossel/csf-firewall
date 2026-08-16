@@ -423,13 +423,24 @@ sub messenger {
 								my $recv = $1;
 								my $status = 1;
 								my $text;
-								eval {
-									local $SIG{__DIE__} = undef;
-									eval("no lib '/usr/local/csf/lib'");
-									my $urlget = ConfigServer::URLGet->new(2, "", $config{URLPROXY});
-									my $url = "https://www.google.com/recaptcha/api/siteverify?secret=$config{RECAPTCHA_SECRET}&response=$recv";
-									($status, $text) = $urlget->urlget($url);
-								};
+								
+								# $recv is an unauthenticated, network-supplied reCAPTCHA response
+								# token that is interpolated into the siteverify URL below. Reject
+								# anything outside the reCAPTCHA token grammar so a hostile value
+								# cannot alter the request, even when URLGet falls back to
+								# curl/wget. Defence in depth alongside the list-form open3 fix in
+								# ConfigServer::URLGet.
+								if ($recv !~ /\A[A-Za-z0-9_-]+\z/) {
+									$text = "rejected malformed reCAPTCHA response token";
+								} else {
+									eval {
+										local $SIG{__DIE__} = undef;
+										eval("no lib '/usr/local/csf/lib'");
+										my $urlget = ConfigServer::URLGet->new(2, "", $config{URLPROXY});
+										my $url = "https://www.google.com/recaptcha/api/siteverify?secret=$config{RECAPTCHA_SECRET}&response=$recv";
+										($status, $text) = $urlget->urlget($url);
+									};
+								}
 								if ($status) {
 									&messengerlog($homedir,"*Error*, ReCaptcha ($peeraddress): $text");
 									if ($config{DEBUG} >= 1) {
@@ -528,6 +539,14 @@ sub messenger {
 # start messengerv2
 sub messengerv2 {
 	my (undef,undef,$uid,$gid,undef,undef,undef,$homedir) = getpwnam($config{MESSENGER_USER});
+
+	# MESSENGER_USER must be a real, unprivileged account. Without this check
+	# a misconfigured MESSENGER_USER leaves the network-facing messenger
+	# running as root, so any flaw in it becomes a full compromise. The v1
+	# messenger already refuses uid/gid 0; v2 and v3 did not.
+	if (!defined $uid or !defined $gid or $uid == 0 or $gid == 0) {
+		return (1, "MESSENGER_USER [$config{MESSENGER_USER}] must be an existing non-root user");
+	}
 	if ($homedir eq "" or $homedir eq "/" or $homedir =~ m[/etc/csf]) {
 		return (1, "The home directory for $config{MESSENGER_USER} is not valid [$homedir]");
 	}
@@ -577,7 +596,7 @@ sub messengerv2 {
 	print $CONF "\$logfile = '/var/log/lfd_messenger.log';\n";
 	print $CONF "?>\n";
 	system("chown","$config{MESSENGER_USER}:$config{MESSENGER_USER}",$homedir."/recaptcha.php");
-	system("chmod","644",$homedir."/recaptcha.php");
+	system("chmod","600",$homedir."/recaptcha.php");
 
 	
 	open (my $OUT, ">", "/var/lib/csf/csf.conf");
@@ -779,6 +798,14 @@ sub messengerv2 {
 # start messengerv3
 sub messengerv3 {
 	my (undef,undef,$uid,$gid,undef,undef,undef,$homedir) = getpwnam($config{MESSENGER_USER});
+
+	# MESSENGER_USER must be a real, unprivileged account. Without this check
+	# a misconfigured MESSENGER_USER leaves the network-facing messenger
+	# running as root, so any flaw in it becomes a full compromise. The v1
+	# messenger already refuses uid/gid 0; v2 and v3 did not.
+	if (!defined $uid or !defined $gid or $uid == 0 or $gid == 0) {
+		return (1, "MESSENGER_USER [$config{MESSENGER_USER}] must be an existing non-root user");
+	}
 	if ($homedir eq "" or $homedir eq "/" or $homedir =~ m[/etc/csf]) {
 		return (1, "The home directory for $config{MESSENGER_USER} is not valid [$homedir]");
 	}
@@ -829,7 +856,7 @@ EOF
 	print $CONF "\$logfile = '/var/log/lfd_messenger.log';\n";
 	print $CONF "?>\n";
 	system("chown","$config{MESSENGER_USER}:$config{MESSENGER_USER}",$homedir."/recaptcha.php");
-	system("chmod","644",$homedir."/recaptcha.php");
+	system("chmod","600",$homedir."/recaptcha.php");
 
 	if ($config{MESSENGERV3WEBSERVER} eq "apache") {
 		$webserver = "apache";
