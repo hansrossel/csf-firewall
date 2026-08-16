@@ -36,7 +36,7 @@ use Net::CIDR::Lite;
 use Socket;
 use ConfigServer::Config;
 use ConfigServer::Slurp qw(slurp);
-use ConfigServer::CheckIP qw(checkip cccheckip);
+use ConfigServer::CheckIP qw(checkip cccheckip validate_port validate_uid);
 use ConfigServer::Ports;
 use ConfigServer::URLGet;
 use ConfigServer::Sanity qw(sanity);
@@ -4214,6 +4214,26 @@ sub getethdev
 # end getethdev
 ###############################################################################
 # start linefilter
+# Sanitise a value before it is printed back to the operator: an advanced
+# rule can come from a file and carry control bytes or terminal escape
+# sequences. Mirrors logsafe() in lfd.pl.
+sub logsafe {
+	my $value = shift;
+	$value = "" unless defined $value;
+	$value =~ s/[^\x20-\x7e]/?/g;
+	if (length $value > 120) {$value = substr($value,0,120)."..."}
+	return $value;
+}
+###############################################################################
+# An advanced rule was dropped by linefilter() because a field failed
+# validation. Report it so the rule does not silently produce no iptables
+# rule. Mirrors reject_advanced_rule() in lfd.pl, which logs instead.
+sub reject_advanced_rule {
+	my ($line, $field) = @_;
+	print "Skipping advanced rule [".logsafe($line)."]: invalid $field field\n";
+	return;
+}
+###############################################################################
 sub linefilter
 {
 	my $line 		= shift;
@@ -4365,18 +4385,22 @@ sub linefilter
 		{
 			if (($ll[$x] =~ /d=(.*)/))
 			{
-				$dport = "--dport $1";
+				my $port = $1;
+				validate_port($port) or return reject_advanced_rule($line,"port");
+				$dport = "--dport $port";
 				$dport =~ s/_/:/g;
-				if ($protocol eq "-p icmp") {$dport = "--icmp-type $1"}
+				if ($protocol eq "-p icmp") {$dport = "--icmp-type $port"}
 				if ($dport =~ /,/) {$dport = "-m multiport ".$dport}
 				$from = $x + 1;
 				last;
 			}
 			elsif (($ll[$x] =~ /s=(.*)/))
 			{
-				$sport = "--sport $1";
+				my $port = $1;
+				validate_port($port) or return reject_advanced_rule($line,"port");
+				$sport = "--sport $port";
 				$sport =~ s/_/:/g;
-				if ($protocol eq "-p icmp") {$sport = "--icmp-type $1"}
+				if ($protocol eq "-p icmp") {$sport = "--icmp-type $port"}
 				if ($sport =~ /,/) {$sport = "-m multiport ".$sport}
 				$from = $x + 1;
 				last;
@@ -4413,12 +4437,16 @@ sub linefilter
 		{
 			if (($ll[$x] =~ /u=(.*)/))
 			{
-				$uid = "--uid-owner $1";
+				my $owner = $1;
+				validate_uid($owner) or return reject_advanced_rule($line,"owner");
+				$uid = "--uid-owner $owner";
 				last;
 			}
 			elsif (($ll[$x] =~ /g=(.*)/))
 			{
-				$gid = "--gid-owner $1";
+				my $owner = $1;
+				validate_uid($owner) or return reject_advanced_rule($line,"owner");
+				$gid = "--gid-owner $owner";
 				last;
 			}
 		}

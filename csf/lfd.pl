@@ -38,7 +38,7 @@ use POSIX qw(:sys_wait_h sysconf strftime setsid);
 use Socket;
 use ConfigServer::Config;
 use ConfigServer::Slurp qw(slurp);
-use ConfigServer::CheckIP qw(checkip cccheckip);
+use ConfigServer::CheckIP qw(checkip cccheckip validate_port validate_uid);
 use ConfigServer::URLGet;
 use ConfigServer::GetIPs qw(getips);
 use ConfigServer::Service;
@@ -608,6 +608,14 @@ if (-e "/etc/csf/csf.ignore")
 		if ($line =~ /^\s*\#|Include/) {next}
 		my ($first,undef) = split(/\s/,$line);
 		my ($ip,$iscidr) = split(/\//,$first);
+
+		# A "/0" mask in csf.ignore matches every address and silently stops
+		# lfd from blocking anything at all. Refuse it and report it;
+		# csf.allow and csf.deny still accept one.
+		if (defined $iscidr and $iscidr eq "0") {
+			logfile("Ignoring entry with a /0 mask in csf.ignore (it would disable all blocking): [$first]");
+			next;
+		}
 		if (checkip(\$first))
 		{
 			if ($iscidr) {push @cidrs,$first} else {$ignoreips{$ip} = 1}
@@ -6883,9 +6891,7 @@ sub global {
 				seek ($GALLOW, 0, 0);
 				truncate ($GALLOW, 0);
 				if ($config{FASTSTART}) {$faststart = 1}
-				foreach my $line (split (/\n/,$text)) {
-					if ($line =~ /^\#/) {next}
-					my ($ip,$comment) = split (/\s/,$line,2);
+				foreach my $ip (@{&global_feed_entries($text,"GLOBAL_ALLOW")}) {
 					print $GALLOW "$ip\n";
 					if ($config{SAFECHAINUPDATE}) {
 						&linefilter($ip, "allow","NEWGALLOW");
@@ -6994,9 +7000,7 @@ sub global {
 				seek ($GDENY, 0, 0);
 				truncate ($GDENY, 0);
 				if ($config{FASTSTART}) {$faststart = 1}
-				foreach my $line (split (/\n/,$text)) {
-					if ($line =~ /^\#/) {next}
-					my ($ip,$comment) = split (/\s/,$line,2);
+				foreach my $ip (@{&global_feed_entries($text,"GLOBAL_DENY")}) {
 					print $GDENY "$ip\n";
 					if ($config{SAFECHAINUPDATE}) {
 						&linefilter($ip, "deny","NEWGDENY");
@@ -8284,17 +8288,21 @@ sub linefilter {
 		}
 		for (my $x = $from;$x < 3;$x++) {
 			if (($ll[$x] =~ /d=(.*)/)) {
-				$dport = "--dport $1";
+				my $port = $1;
+				validate_port($port) or return reject_advanced_rule($line,"port");
+				$dport = "--dport $port";
 				$dport =~ s/_/:/g;
-				if ($protocol eq "-p icmp") {$dport = "--icmp-type $1"}
+				if ($protocol eq "-p icmp") {$dport = "--icmp-type $port"}
 				if ($dport =~ /,/) {$dport = "-m multiport ".$dport}
 				$from = $x + 1;
 				last;
 			}
 			elsif (($ll[$x] =~ /s=(.*)/)) {
-				$sport = "--sport $1";
+				my $port = $1;
+				validate_port($port) or return reject_advanced_rule($line,"port");
+				$sport = "--sport $port";
 				$sport =~ s/_/:/g;
-				if ($protocol eq "-p icmp") {$sport = "--icmp-type $1"}
+				if ($protocol eq "-p icmp") {$sport = "--icmp-type $port"}
 				if ($sport =~ /,/) {$sport = "-m multiport ".$sport}
 				$from = $x + 1;
 				last;
@@ -8322,11 +8330,15 @@ sub linefilter {
 		}
 		for (my $x = $from;$x < 5;$x++) {
 			if (($ll[$x] =~ /u=(.*)/)) {
-				$uid = "--uid-owner $1";
+				my $owner = $1;
+				validate_uid($owner) or return reject_advanced_rule($line,"owner");
+				$uid = "--uid-owner $owner";
 				last;
 			}
 			elsif (($ll[$x] =~ /g=(.*)/)) {
-				$gid = "--gid-owner $1";
+				my $owner = $1;
+				validate_uid($owner) or return reject_advanced_rule($line,"owner");
+				$gid = "--gid-owner $owner";
 				last;
 			}
 		}
@@ -8376,10 +8388,64 @@ sub linefilter {
 # end linefilter
 ###############################################################################
 # start iptablescmd
+# Sanitise a value before it reaches lfd.log. Remote feed and DNS supplied
+# data reaches the log on the rejection paths, so replace anything outside
+# printable ASCII (control bytes, terminal escape sequences) and cap the
+# length so a single oversized entry cannot flood the log.
+sub logsafe {
+	my $value = shift;
+	$value = "" unless defined $value;
+	$value =~ s/[^\x20-\x7e]/?/g;
+	if (length $value > 120) {$value = substr($value,0,120)."..."}
+	return $value;
+}
+###############################################################################
+# A global list is retrieved from a remote location, so every entry must be a
+# bare IP or CIDR range. Advanced rules must never reach linefilter() from
+# here, because that parser interpolates its fields into a command string. A
+# "/0" mask is refused too: from a feed it is inserted ahead of the deny
+# chains and short-circuits every deny rule on the server. Rejected entries
+# are reported rather than silently ignored.
+sub global_feed_entries {
+	my ($text, $feed) = @_;
+
+	my @ips;
+	my $skipped = 0;
+	my $sample;
+	foreach my $line (split(/\n/,$text)) {
+		if ($line =~ /^(\s|\#|$)/) {next}
+		my ($ip,$comment) = split(/\s/,$line,2);
+		my (undef,$mask) = split(/\//,$ip);
+		if ((defined $mask and $mask eq "0") or !checkip(\$ip)) {
+			$skipped++;
+			$sample = $line unless defined $sample;
+			next;
+		}
+		push @ips, $ip;
+	}
+	if ($skipped) {
+		logfile("$feed: ignored $skipped entries that are not a bare IP/CIDR, first was [".logsafe($sample)."] - a global list may not contain advanced rules, hostnames or a /0 mask");
+	}
+	return \@ips;
+}
+###############################################################################
+# An advanced rule was dropped by linefilter() because a field failed
+# validation. Log it so the rule does not silently produce no iptables rule.
+sub reject_advanced_rule {
+	my ($line, $field) = @_;
+	logfile("Skipping advanced rule [".logsafe($line)."]: invalid $field field");
+	return;
+}
+###############################################################################
 sub iptablescmd {
 	my $line = shift;
 	my $command = shift;
-	$command =~ s/;`|//g;
+	# Defence in depth. The previous form was s/;`|//g, which perl reads as
+	# the alternation ";`" or "" - so it stripped only a semicolon followed
+	# immediately by a backtick and left ; ` && | $() and newlines intact.
+	# Callers must not rely on this: commands are built from validated
+	# fields, and this only removes what has no business in one.
+	$command =~ s/[;`\n\r]//g;
 	my $status = 0;
 	my $iptableslock = 0;
 	if ($command =~ /^($config{IPTABLES}|$config{IP6TABLES})/) {$iptableslock = 1}
