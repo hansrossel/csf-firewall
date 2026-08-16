@@ -1,0 +1,103 @@
+# #
+#   @app                ConfigServer Security & Firewall (CSF)
+#                       Login Failure Daemon (LFD)
+#   @website            https://configserver.dev
+#   @docs               https://docs.configserver.dev
+#   @download           https://download.configserver.dev
+#   @repo               https://github.com/Aetherinox/csf-firewall
+#   @copyright          Copyright (C) 2025-2026 Aetherinox
+#                       Copyright (C) 2006-2025 Jonathan Michaelson
+#                       Copyright (C) 2006-2025 Way to the Web Ltd.
+#   @license            GPLv3
+#   @updated            02.12.2026
+#   
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 3 of the License, or (at
+#   your option) any later version.
+#   
+#   This program is distributed in the hope that it will be useful, but
+#   WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+#   General Public License for more details.
+#   
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, see <https://www.gnu.org/licenses>.
+# #
+
+# #
+#   This file lists usernames allowed to log via syslog/rsyslog. Users listed
+#   here will be added to the system group defined by RESTRICT_SYSLOG_GROUP
+#   in /etc/csf/csf.conf if RESTRICT_SYSLOG is set to "3".
+#   
+#   Warning:    This WILL break cron logging in /var/log/cron for users not
+#               listed here.
+#   
+#   Remove any accounts that do not apply to your server. Add any accounts
+#   that log through syslog which you need to allow.
+#   
+#   Only add user accounts (and the default apache account only if
+#   absolutely necessary).
+#   
+#   Adding unnecessary accounts reduces the security value of this feature.
+# #
+
+# #
+#   OS application users:
+# #
+
+daemon
+dbus
+haldaemon
+messagebus
+mysql
+named
+nfsnobody
+ntp
+polkitd
+root
+rpc
+rpcuser
+smmsp
+statd
+
+# #
+#   cPanel application users:
+# #
+
+cpanel
+cpses
+dovecot
+dovenull
+mailman
+mailnull
+
+# #
+#   DirectAdmin application users:
+# #
+
+dovecot
+mail
+
+# #
+#   InterWorx users:
+# #
+
+qmailq
+qmails
+qmailr
+qmailp
+qmaill
+qmaild
+alias
+iworx-horde
+iworx-roundcube
+iworx-pma
+iworx-backup
+iworx-web
+iworx
+vpopmail
+
+# #
+#   Other users:
+# #

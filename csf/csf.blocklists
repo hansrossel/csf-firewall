@@ -1,0 +1,217 @@
+# #
+#   @app                ConfigServer Security & Firewall (CSF)
+#                       Login Failure Daemon (LFD)
+#   @website            https://configserver.dev
+#   @docs               https://docs.configserver.dev
+#   @download           https://download.configserver.dev
+#   @repo               https://github.com/Aetherinox/csf-firewall
+#   @copyright          Copyright (C) 2025-2026 Aetherinox
+#                       Copyright (C) 2006-2025 Jonathan Michaelson
+#                       Copyright (C) 2006-2025 Way to the Web Ltd.
+#   @license            GPLv3
+#   @updated            02.12.2026
+#   
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 3 of the License, or (at
+#   your option) any later version.
+#   
+#   This program is distributed in the hope that it will be useful, but
+#   WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+#   General Public License for more details.
+#   
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, see <https://www.gnu.org/licenses>.
+# #
+
+# #
+#   This file contains definitions to IP BLOCK lists.
+#   
+#   Uncomment the line starting with the rule name to use it, then restart csf
+#   and then lfd using:
+#       sudo csf -ra
+#   
+#   Each block list must be listed on per line: as NAME|INTERVAL|MAX|URL
+#       NAME        List name with all uppercase alphabetic characters with no
+#                       spaces and a maximum of 25 characters - this will be used as the
+#                       iptables chain name
+#       INTERVAL    Refresh interval to download the list, must be a minimum of 3600
+#                       seconds (an hour), but 86400 (a day) should be more than enough
+#       MAX         This is the maximum number of IP addresses to use from the list,
+#                       a value of 0 means all IPs
+#       URL         The URL to download the list from
+#   
+#   Note:           Some of these lists may be very long and could cause serious network
+#                   and/or performance issues unless you are using LF_IPSET in csf, so
+#                   setting a value for the MAX field should be considered
+#   
+#   Note:           CXS_ is a reserved prefix for the blocklist name and MUST NOT be used
+#   
+#   After making any changes to this file you must restart csf and then lfd
+#   
+#   If you want to re-download a blocklist you must first delete
+#   /var/lib/csf/csf.block.NAME and then restart csf and then lfd
+#   
+#   Each URL is scanned for an IP/CIDR address per line and if found is blocked
+#   
+#   The downloaded list can be a zip file. The zip file MUST only contain a
+#   single text file of a single IP/CIDR per line
+# #
+
+# #
+#   @blocklist              Official CSF Blocklists
+#   @details:               https://docs.configserver.dev/usage/blocklists/#official-blocklists
+#                           https://docs.configserver.dev/services/blocklist.configserver/
+#   
+#   The official CSF blocklists contain a large number of IPs which range from various 
+#   different services, including AbuseIPDB (100% confidency).
+#   
+#   If using our blocklist service, we must rate-limit the usage. However, our standard
+#   blocklists will always be free and available at:
+#       https://github.com/ConfigServerApps/service-blocklists
+#   
+#   For help and a feature list, visit our blocklist service at:
+#       https://blocklist.configserver.dev/help
+#   
+#   Main blocklists are located at::
+#       http://blocklist.configserver.dev/master.ipset
+#       http://blocklist.configserver.dev/highrisk.ipset
+#   
+#   Requires you to edit /etc/csf/csf.conf setting:
+#       LF_IPSET_MAXELEM = "4000000"
+# #
+
+#   CSF_MASTER|43200|0|http://blocklist.configserver.dev/master.ipset
+#   CSF_HIGHRISK|43200|0|http://blocklist.configserver.dev/highrisk.ipset
+
+# #
+#   @blocklist              Spamhaus Don't Route Or Peer List (DROP)
+#   @details:               https://www.spamhaus.org/blocklists/do-not-route-or-peer/
+# #
+
+#   SPAMDROP|86400|0|https://www.spamhaus.org/drop/drop.txt
+
+# #
+#   @blocklist              Spamhaus IPv6 Don't Route Or Peer List (DROPv6)
+#   @details:               https://www.spamhaus.org/blocklists/do-not-route-or-peer/
+# #
+
+#   SPAMDROPV6|86400|0|https://www.spamhaus.org/drop/dropv6.txt
+
+# #
+#   @blocklist              AbuseIPDB
+#   @details:               https://abuseipdb.com/account/api
+#   @notes:                 Requires you to create an account.
+#                           Requires you to generate an API key.
+#                           Add your generated API key in the URL below by 
+#                               replacing `YOUR_API_KEY`.
+#                           Change the 3rd field `10000` to a higher number
+#                               if you are on a paid plan.
+#   
+#                           Full documentation at:
+#                               https://docs.configserver.dev/install/integrations/abuseipdb/
+# #
+
+#   ABUSEIPDB|86400|10000|https://api.abuseipdb.com/api/v2/blacklist?key=YOUR_API_KEY&plaintext
+
+# #
+#   @blocklist              DShield.org Recommended Block List
+#   @details:               https://dshield.org
+# #
+
+#   DSHIELD|86400|0|https://dshield.org/block.txt
+
+# #
+#   @blocklist              TOR Exit Nodes List
+#   @details:               https://trac.torproject.org/projects/tor/wiki/doc/TorDNSExitList
+#   @notes                  Set URLGET in csf.conf to use LWP as this list
+#                           uses an SSL connection
+# #
+
+#   TOR|86400|0|https://check.torproject.org/cgi-bin/TorBulkExitList.py?ip=1.2.3.4
+
+# #
+#   @blocklist              BOGON list
+#   @details:               http://team-cymru.org/Services/Bogons
+# #
+
+#   BOGON|86400|0|http://cymru.com/Documents/bogon-bn-agg.txt
+
+# #
+#   @blocklist              Project Honey Pot Directory of Dictionary Attacker IPs
+#   @details:               http://projecthoneypot.org
+# #
+
+#   HONEYPOT|86400|0|https://projecthoneypot.org/list_of_ips.php?t=d&rss=1
+
+# #
+#   @blocklist              C.I. Army Malicious IP List
+#   @details:               https://ciarmy.com
+# #
+
+#   CIARMY|86400|0|http://ciarmy.com/list/ci-badguys.txt
+
+# #
+#   @blocklist              BruteForceBlocker IP List
+#   @details:               http://danger.rulez.sk/index.php/bruteforceblocker
+# #
+
+#   BFB|86400|0|http://danger.rulez.sk/projects/bruteforceblocker/blist.php
+
+# #
+#   @blocklist              MaxMind GeoIP Anonymous Proxies
+#   @details:               https://maxmind.com/en/anonymous_proxies
+#   @notes:                 Set URLGET in csf.conf to use LWP as this list
+#                           uses an SSL connection
+#   
+#                           This is now a paid service.
+# #
+
+#   MAXMIND|86400|0|https://www.maxmind.com/en/anonymous_proxies
+
+# #
+#   @blocklist              Blocklist.de
+#   @details:               https://blocklist.de
+#   @notes:                 Set URLGET in csf.conf to use LWP as this list
+#                           uses an SSL connection
+#   
+#   This first list only retrieves the IP addresses added in the last hour
+# #
+
+#   BDE|3600|0|https://api.blocklist.de/getlast.php?time=3600
+
+# #
+#   This second list retrieves all the IP addresses added in the last 48 hours
+#   and is usually a very large list (over 10000 entries), so be sure that you
+#   have the resources available to use it
+# #
+
+#   BDEALL|86400|0|http://lists.blocklist.de/lists/all.txt
+
+# #
+#   @blocklist              Stop Forum Spam IPv4
+#   @details:               http://stopforumspam.com/downloads
+#   @notes:                 Many of the lists available contain a vast number of
+#                           IP addresses so special care needs to be made when
+#                           selecting from their lists
+# #
+
+#   STOPFORUMSPAMV4|86400|0|http://www.stopforumspam.com/downloads/listed_ip_1.zip
+
+# #
+#   @blocklist              Stop Forum Spam IPv6
+#   @details:               http://stopforumspam.com/downloads
+#   @notes:                 Many of the lists available contain a vast number of
+#                           IP addresses so special care needs to be made when
+#                           selecting from their lists
+# #
+
+#   STOPFORUMSPAMV6|86400|0|http://www.stopforumspam.com/downloads/listed_ip_1_ipv6.zip
+
+# #
+#   @blocklist              GreenSnow Hack List
+#   @details:               https://greensnow.co
+# #
+
+#   GREENSNOW|86400|0|https://blocklist.greensnow.co/greensnow.txt

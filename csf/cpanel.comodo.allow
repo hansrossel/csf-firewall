@@ -1,0 +1,87 @@
+# #
+#   @app                ConfigServer Security & Firewall (CSF)
+#                       Login Failure Daemon (LFD)
+#   @website            https://configserver.dev
+#   @docs               https://docs.configserver.dev
+#   @download           https://download.configserver.dev
+#   @repo               https://github.com/Aetherinox/csf-firewall
+#   @copyright          Copyright (C) 2025-2026 Aetherinox
+#                       Copyright (C) 2006-2025 Jonathan Michaelson
+#                       Copyright (C) 2006-2025 Way to the Web Ltd.
+#   @license            GPLv3
+#   @updated            02.12.2026
+#   
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 3 of the License, or (at
+#   your option) any later version.
+#   
+#   This program is distributed in the hope that it will be useful, but
+#   WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+#   General Public License for more details.
+#   
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, see <https://www.gnu.org/licenses>.
+# #
+
+# #
+#   This file contains IP addresses that are explicitly whitelisted in CSF.
+#   These IPs belong to Sectigo (formerly Comodo), the SSL provider used by
+#   cPanel’s free AutoSSL system (available in version 58 and later).
+#   
+#   Whitelisting ensures that connections from Sectigo are never blocked by
+#   firewall rules, allowing SSL certificates to be issued and renewed without
+#   interruption.
+#   
+#   If you prefer not to whitelist these IPs, remove the "Include" line for this
+#   file from your csf.allow configuration. That include entry is only added once.
+#   
+#   ⚠️ Note:    This file is automatically managed by cPanel and CSF updates.
+#               Do NOT manually modify or remove entries in this file, as your
+#               changes will be overwritten during updates.
+# #
+
+# #
+#   There is confusion about the difference between the files:
+#       - cpanel.comodo.allow
+#       - cpanel.comodo.ignore
+#   
+#   cpanel.comodo.allow                 Whitelist Sectigo IPs through the firewall.
+#                  Desc:                Ensure cPanel’s AutoSSL servers can reach
+#                                           your server — no firewall blocks.
+#               Affects:                iptables
+#   
+#   cpanel.comodo.ignore                Exclude Sectigo IPs from login/banning checks.
+#                  Desc:                Prevents CSF’s brute-force detection system
+#                                           from accidentally blocking them.
+#               Affects:                lfd (Login Failure Daemon)
+# #
+
+tcp|in|d=80|s=178.255.81.12 # Sectigo SSL Resolver
+tcp|in|d=443|s=178.255.81.12 # Sectigo SSL Resolver
+tcp|in|d=53|s=178.255.81.12 # Sectigo SSL Resolver
+
+tcp|in|d=80|s=178.255.81.13 # Sectigo SSL Resolver
+tcp|in|d=443|s=178.255.81.13 # Sectigo SSL Resolver
+tcp|in|d=53|s=178.255.81.13 # Sectigo SSL Resolver
+
+tcp|in|d=80|s=91.199.212.52 # Sectigo DCV Server
+tcp|in|d=443|s=91.199.212.52 # Sectigo DCV Server
+tcp|in|d=53|s=91.199.212.52 # Sectigo DCV Server
+
+tcp|in|d=80|s=91.199.212.132 # Sectigo DCV Server
+tcp|in|d=443|s=91.199.212.132 # Sectigo DCV Server
+tcp|in|d=53|s=91.199.212.132 # Sectigo DCV Server
+
+tcp|in|d=80|s=199.66.201.132 # Sectigo DCV Server
+tcp|in|d=443|s=199.66.201.132 # Sectigo DCV Server
+tcp|in|d=53|s=199.66.201.132 # Sectigo DCV Server
+
+tcp|in|d=80|s=2a02:1788:402:1c80::/64 # Sectigo DCV Server
+tcp|in|d=443|s=2a02:1788:402:1c80::/64 # Sectigo DCV Server
+tcp|in|d=53|s=2a02:1788:402:1c80::/64 # Sectigo DCV Server
+
+tcp|in|d=80|s=2a02:1788:400:1ce4::/64 # Sectigo DCV Server
+tcp|in|d=443|s=2a02:1788:400:1ce4::/64 # Sectigo DCV Server
+tcp|in|d=53|s=2a02:1788:400:1ce4::/64 # Sectigo DCV Server

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<cyberpanelPluginConfig>
+  <name>ConfigServer Security and Firewall</name>
+  <type>plugin</type>
+  <description>Linux security tool that provides advanced firewall management and intrusion detection.</description>
+  <version>15.10</version>
+</cyberpanelPluginConfig>

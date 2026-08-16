@@ -1,0 +1,27 @@
+{% extends "baseTemplate/index.html" %}
+{% load i18n %}
+{% block title %}ConfigServer Security and Firewall{% endblock %}
+{% block content %}
+
+{% load static %}
+
+<iframe
+    name="myiframe"
+    id="myiframe"
+    src="/configservercsf/iframe/"
+    style="width:100%; overflow:hidden;"
+    frameborder="0"
+    scrolling="no"
+    onload="resizeIframe( this );">
+</iframe>
+
+<script>
+    function resizeIframe( obj )
+    {
+        obj.style.height = obj.contentWindow.document.body.scrollHeight + 'px';
+        window.scrollTo( 0, 0 );
+    }
+    window.parent.parent.scrollTo( 0, 0 );
+</script>
+
+{% endblock %}

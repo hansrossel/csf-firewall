@@ -1,0 +1,51 @@
+# #
+#   @app                ConfigServer Security & Firewall (CSF)
+#                       Login Failure Daemon (LFD)
+#   @website            https://configserver.dev
+#   @docs               https://docs.configserver.dev
+#   @download           https://download.configserver.dev
+#   @repo               https://github.com/Aetherinox/csf-firewall
+#   @copyright          Copyright (C) 2025-2026 Aetherinox
+#                       Copyright (C) 2006-2025 Jonathan Michaelson
+#                       Copyright (C) 2006-2025 Way to the Web Ltd.
+#   @license            GPLv3
+#   @updated            02.12.2026
+#   
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 3 of the License, or (at
+#   your option) any later version.
+#   
+#   This program is distributed in the hope that it will be useful, but
+#   WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+#   General Public License for more details.
+#   
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, see <https://www.gnu.org/licenses>.
+# #
+
+# #
+#   The following IP addresses will be ignored by LFD (Login Failure Daemon)
+#   and allowed through iptables to ensure uninterrupted communication with
+#   cPanel license servers.
+#   
+#   These IPs belong to cPanel and are responsible for authenticating licenses
+#   and maintaining proper cPanel service functionality.
+#   
+#   The "ignore" file specifically tells LFD to not block or trigger alerts
+#   for these IPs. Traffic is allowed through the firewall automatically, but
+#   LFD monitoring is bypassed.
+#   
+#   ⚠️ Note:    This file is automatically managed by CSF and will be replaced
+#               during upgrades. Do NOT edit manually. If you do not want these
+#               IPs ignored, remove the "Include" line from csf.ignore in
+#               the main configuration.
+# #
+
+208.74.123.2 # cPanel Auth Server
+208.74.123.3 # cPanel Auth Server
+208.74.121.82 # cPanel Auth Server
+208.74.121.83 # cPanel Auth Server
+208.74.121.85 # cPanel Auth Server
+208.74.121.86 # cPanel Auth Server

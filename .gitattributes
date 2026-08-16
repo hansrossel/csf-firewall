@@ -1,0 +1,3 @@
+# Store every file byte-verbatim: this tree is repackaged into a release
+# artifact whose sha256 is pinned, so no EOL translation may occur.
+* -text

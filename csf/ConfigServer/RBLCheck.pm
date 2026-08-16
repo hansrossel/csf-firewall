@@ -1,0 +1,401 @@
+# #
+#   @app                ConfigServer Security & Firewall (CSF)
+#                       Login Failure Daemon (LFD)
+#   @website            https://configserver.dev
+#   @docs               https://docs.configserver.dev
+#   @download           https://download.configserver.dev
+#   @repo               https://github.com/Aetherinox/csf-firewall
+#   @copyright          Copyright (C) 2025-2026 Aetherinox
+#                       Copyright (C) 2006-2025 Jonathan Michaelson
+#                       Copyright (C) 2006-2025 Way to the Web Ltd.
+#   @license            GPLv3
+#   @updated            02.12.2026
+#   
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 3 of the License, or (at
+#   your option) any later version.
+#   
+#   This program is distributed in the hope that it will be useful, but
+#   WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+#   General Public License for more details.
+#   
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, see <https://www.gnu.org/licenses>.
+# #
+## no critic (RequireUseWarnings, ProhibitExplicitReturnUndef, ProhibitMixedBooleanOperators, RequireBriefOpen)
+# start main
+package ConfigServer::RBLCheck;
+
+use strict;
+use lib '/usr/local/csf/lib';
+use Fcntl qw(:DEFAULT :flock);
+use ConfigServer::Config;
+use ConfigServer::CheckIP qw(checkip);
+use ConfigServer::Slurp qw(slurp);
+use ConfigServer::GetIPs qw(getips);
+use ConfigServer::RBLLookup qw(rbllookup);
+use ConfigServer::Sanitize qw(html_safe html_escape);
+use ConfigServer::GetEthDev;
+use IPC::Open3;
+use Net::IP;
+
+use Exporter 	qw(import);
+our $VERSION	= 1.01;
+our @ISA		= qw(Exporter);
+our @EXPORT_OK	= qw();
+
+my ( $ui, $failures, $verbose, $cleanreg, $status, %ips, $images, %config,
+	$ipresult, $output );
+
+my $ipv4reg 	= ConfigServer::Config->ipv4reg;
+my $ipv6reg 	= ConfigServer::Config->ipv6reg;
+
+sub report
+{
+	$verbose 	= shift;
+	$images 	= shift;
+	$ui 		= shift;
+	my $config 	= ConfigServer::Config->loadconfig();
+	%config 	= $config->config();
+	$cleanreg 	= ConfigServer::Slurp->cleanreg;
+	$failures 	= 0;
+	$| 			= 1;
+
+	&startoutput;
+	&getethdev;
+
+	my @RBLS = slurp("/usr/local/csf/lib/csf.rbls");
+
+	if (-e "/etc/csf/csf.rblconf")
+	{
+		my @entries = slurp("/etc/csf/csf.rblconf");
+		foreach my $line (@entries)
+		{
+			if ($line =~ /^Include\s*(.*)$/)
+			{
+				my @incfile = slurp($1);
+				push @entries,@incfile;
+			}
+		}
+
+		foreach my $line ( @entries )
+		{
+			$line =~ s/$cleanreg//g;
+			if ( $line eq "" )
+			{
+				next
+			}
+
+			if ( $line =~ /^\s*\#|Include/ )
+			{
+				next
+			}
+	
+			if ( $line =~ /^enablerbl:(.*)$/ )
+			{
+				push @RBLS, $1;
+			}
+			elsif ( $line =~ /^disablerbl:(.*)$/ )
+			{
+				my $hit = $1;
+				for ( 0..@RBLS )
+				{
+					my $x 				= $_;
+					my ( $rbl,$rblurl )	= split(/:/,$RBLS[$x],2);
+					if ( $rbl eq $hit )
+					{
+						$RBLS[$x] = ""
+					}
+				}
+			}
+
+			if ( $line =~ /^enableip:(.*)$/ )
+			{
+				if ( checkip(\$1) )
+				{
+					$ips{$1} = 1
+				}
+			}
+			elsif ( $line =~ /^disableip:(.*)$/ )
+			{
+				if ( checkip(\$1) )
+				{
+					delete $ips{$1}
+				}
+			}
+		}
+	}
+
+	@RBLS = sort @RBLS;
+
+	foreach my $ip ( sort keys %ips )
+	{
+		my $netip 	= Net::IP->new( $ip );
+		my $type 	= $netip->iptype();
+
+		if ( $type eq "PUBLIC" )
+		{
+
+			if ( $verbose and -e "/var/lib/csf/${ip}.rbls" )
+			{
+				unlink "/var/lib/csf/${ip}.rbls";
+			}
+
+			if ( -e "/var/lib/csf/${ip}.rbls" )
+			{
+				my $text = join( "\n",slurp( "/var/lib/csf/${ip}.rbls" ) );
+				if ( $ui )
+				{
+					print $text
+				}
+				else
+				{
+					$output .= $text
+				}
+			}
+			else
+			{
+				if ( $verbose )
+				{
+					$ipresult 	= "";
+					my $hits 	= 0;
+
+					&addtitle( "Checked $ip ($type) on ".localtime( ) );
+
+					foreach my $line ( @RBLS )
+					{
+						my ( $rbl, $rblurl ) = split( /:/, $line, 2 );
+						if ( $rbl eq "" )
+						{
+							next
+						}
+
+						my ( $rblhit, $rbltxt )	= rbllookup( $ip, $rbl );
+						my @tmptxt 				= $rbltxt;
+						$rbltxt = "";
+
+						foreach my $line ( @tmptxt )
+						{
+							$line 		= html_escape( $line );
+							$line 		=~ s/(http(\S+))/<a target="_blank" href="$1">$1<\/a>/g;
+							$rbltxt		.= "${line}\n";
+						}
+
+						$rbltxt =~ s/\n/<br>\n/g;
+
+						if ( $rblhit eq "timeout" )
+						{
+							&addline( 2, $rbl, $rblurl, "TIMEOUT" );
+						}
+						elsif ( $rblhit eq "" )
+						{
+							if ( $verbose == 2 )
+							{
+								&addline( 0, $rbl, $rblurl, "OK" );
+							}
+						}
+						else
+						{
+							&addline( 1, $rbl, $rblurl, $rbltxt );
+							$hits++;
+						}
+					}
+
+					unless ( $hits )
+					{
+						my $text;
+						$text .= "<div class='bs-callout-success' style='box-shadow: inset 0 0 0 9999px color-mix(in srgb, currentColor 16%, transparent);padding:10px;'>OK</div>\n";
+
+						if ( $ui )
+						{
+							print $text
+						}
+						else
+						{
+							$output .= $text
+						}
+
+						$ipresult .= $text;
+					}
+
+					sysopen ( my $OUT, "/var/lib/csf/${ip}.rbls", O_WRONLY | O_CREAT );
+					flock( $OUT, LOCK_EX );
+					print $OUT $ipresult;
+					close ( $OUT );
+				}
+				else
+				{
+					&addtitle( "New $ip ($type)" );
+					my $text;
+					$text .= "<div style='clear: both;padding: 8px;'>Not Checked</div>\n";
+					if ( $ui )
+					{
+						print $text
+					}
+					else
+					{
+						$output .= $text
+					}
+				}
+			}
+		}
+		else
+		{
+			if ( $verbose == 2 )
+			{
+				&addtitle( "Skipping $ip ($type)" );
+				my $text;
+				$text .= "<div class='bs-callout-success' style='box-shadow: inset 0 0 0 9999px color-mix(in srgb, currentColor 16%, transparent);padding:10px;'>OK</div>\n";
+
+				if ( $ui )
+				{
+					print $text
+				}
+				else
+				{
+					$output .= $text
+				}
+			}
+		}
+	}
+
+	&endoutput;
+
+	return ( $failures, $output );
+}
+
+
+sub startoutput
+{
+	return;
+}
+
+sub addline
+{
+	my $status 		= shift;
+	my $rbl 		= shift;
+	my $rblurl 		= shift;
+	my $comment 	= shift;
+	my $check 		= $rbl;
+	my $text;
+
+	if ( $rblurl ne "" )
+	{
+		$check = "<a href='$rblurl' target='_blank'>$rbl</a>"
+	}
+
+	# #
+	#	@since			v15.10
+	#	@about			Now supports lookup table and various different status
+	#	
+	#					0		success
+	#					1		danger / error
+	#					2		warning
+	#					3		info
+	# #
+
+	my %callouts =
+	(
+		0 => { class => "bs-callout-success",  opacity => "16%" },
+		1 => { class => "bs-callout-danger",   opacity => "26%" },
+		2 => { class => "bs-callout-warning",  opacity => "21%" },
+		3 => { class => "bs-callout-info",     opacity => "16%" },
+	);
+
+	# #
+	#	Always render danger (0) messages;
+	#	All other message types require $verbose
+	# #
+
+	if ( $status == 1 or $verbose )
+	{
+		my $callout 	= $callouts{$status} || $callouts{0};
+		my $class 		= $callout->{class};
+		my $opacity 	= $callout->{opacity};
+
+		$text 	.= "<div class='rblcheck-parent' style='display: flex;width: 100%;clear: both;'>\n";
+		$text 	.= "<div class='rblcheck-status $class' style='width: 250px;box-shadow: inset 0 0 0 9999px color-mix(in srgb, currentColor $opacity, transparent);padding: 8px;'>$check</div>\n";
+		$text 	.= "<div class='rblcheck-comment' style='flex: 1;padding: 8px;'>$comment</div>\n";
+		$text 	.= "</div>\n";
+
+		if ( $status == 1 )
+		{
+			$failures ++;
+			$ipresult .= $text;
+		}
+	}
+
+	if ( $ui )
+	{
+		print $text
+	}
+	else
+	{
+		$output .= $text
+	}
+
+	return;
+}
+
+
+sub addtitle
+{
+	my $title = shift;
+	my $text;
+
+	$text 	.= "<br><div class='panel-default'><div class='panel-heading' style='clear: both;padding: 8px;border-top-right-radius: 5px;border-top-left-radius: 5px;'><strong>$title</strong></div></div>\n";
+	$ipresult .= $text;
+
+	if ( $ui )
+	{
+		print $text
+	}
+	else
+	{
+		$output .= $text
+	}
+
+	return;
+}
+
+sub endoutput
+{
+	if ( $ui )
+	{
+		print "<br>\n"
+	}
+	else
+	{
+		$output .= "<br>\n"
+	}
+
+	return;
+}
+
+
+sub getethdev
+{
+	my $ethdev 		= ConfigServer::GetEthDev->new();
+	my %g_ipv4 		= $ethdev->ipv4;
+	my %g_ipv6 		= $ethdev->ipv6;
+
+	foreach my $key (keys %g_ipv4)
+	{
+		$ips{$key} = 1;
+	}
+
+#	if ($config{IPV6}) {
+#		foreach my $key (keys %g_ipv6) {
+#			eval {
+#				local $SIG{__DIE__} = undef;
+#				$ipscidr6->add($key);
+#			};
+#		}
+#	}
+
+	return;
+}
+
+1;

@@ -1,0 +1,9 @@
+# Local agent configuration; never published.
+.claude/
+
+# Upstream ships a self-signed TLS keypair for the CSF web UI. The private key
+# is identical in every CSF release, so it is a published, shared credential
+# rather than a secret. This fork runs CSF headless and does not republish
+# private keys; the release artifact keeps the upstream files verbatim.
+csf/ui/server.key
+csf/ui/ssl-expired/server.key
