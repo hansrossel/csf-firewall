@@ -9431,13 +9431,26 @@ sub messengerrecaptcha {
 		$SIG{HUP} = \&childcleanup;
 		$SIG{__DIE__} = sub {&childcleanup(@_);};
 
-		if (-f "$homedir/unblock.txt") {
+		# unblock.txt lives in MESSENGER_USER's home, which that unprivileged
+		# user owns and can replace with a symlink or a hardlink. Opening it
+		# through _open_unblock_queue() (O_NOFOLLOW + fstat on the open
+		# descriptor) stops this root process from being tricked into reading
+		# or truncating an arbitrary file (symlink/TOCTOU).
+		my $UNBLOCK;
+		if (-f "$homedir/unblock.txt" and ($UNBLOCK = _open_unblock_queue("$homedir/unblock.txt", $uid))) {
 			my @alert = slurp("/usr/local/csf/tpl/recaptcha.txt");
-			sysopen (my $UNBLOCK, "$homedir/unblock.txt", O_RDWR | O_CREAT);
-			flock($UNBLOCK, LOCK_EX);
 			while (my $line = <$UNBLOCK>) {
 				chomp $line;
 				my ($unblockip,$host,$hostip) = split(/;/,$line);
+
+				# $host and $hostip come from a queue file written by the
+				# network-facing MESSENGER_USER. Constrain them before they reach
+				# the alert mail template and lfd.log, so they cannot inject mail
+				# headers, extra log lines or template markers.
+				$host //= "";
+				$hostip //= "";
+				$host =~ tr/A-Za-z0-9.:_-//cd;
+				$hostip =~ tr/A-Za-z0-9.://cd;
 				if (checkip(\$unblockip)) {
 					&logfile("reCAPTCHA: Unblocking client [$unblockip] on domain [$host ($hostip)]");
 					&syscommand(__LINE__,"/usr/sbin/csf","-dr",$unblockip);
@@ -9467,6 +9480,35 @@ sub messengerrecaptcha {
 	}
 	return;
 }
+# Safely open MESSENGER_USER's reCAPTCHA unblock queue for the root
+# reCAPTCHA processor. The queue file lives in the messenger user's own home
+# directory, so that unprivileged user can replace it with a symlink or a
+# hardlink. Open with O_NOFOLLOW so a symlinked final component is refused,
+# then fstat the OPEN DESCRIPTOR and confirm it is a regular file owned by
+# $owner_uid with a single hard link. Returns the locked read/write
+# filehandle, or undef (after logging the reason) when the file fails the
+# safety checks, so root cannot be tricked into reading or truncating an
+# arbitrary file (symlink/TOCTOU).
+sub _open_unblock_queue {
+	my ($path, $owner_uid) = @_;
+
+	my $fh;
+	unless (sysopen ($fh, $path, O_RDWR | O_NOFOLLOW)) {
+		&logfile("reCAPTCHA: *Error* unable to open [$path] safely: $!");
+		return;
+	}
+	flock($fh, LOCK_EX);
+
+	my (undef,undef,$mode,$nlink,$fuid) = stat($fh);
+	unless (defined $mode and Fcntl::S_ISREG($mode) and $fuid == $owner_uid and $nlink == 1) {
+		&logfile("reCAPTCHA: *Error* refusing to process [$path]; not a single-link regular file owned by uid [$owner_uid] (possible symlink attack)");
+		close($fh);
+		return;
+	}
+
+	return $fh;
+}
+###############################################################################
 # end messengerrecaptcha
 ###############################################################################
 # start messenger
