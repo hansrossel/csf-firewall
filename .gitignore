@@ -1,5 +1,8 @@
 # Local agent configuration; never published.
 .claude/
+.agents/
+.codex/
+AGENTS.md
 
 # Upstream ships a self-signed TLS keypair for the CSF web UI. The private key
 # is identical in every CSF release, so it is a published, shared credential
