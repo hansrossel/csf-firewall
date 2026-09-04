@@ -47,4 +47,20 @@ vervang de placeholder-entry hieronder zodra een echt item wordt vastgelegd.
 - **Gebundeld in**: [KI-NNN, alleen bij MERGED]
 - **Vastgelegd in commit**: [hash, alleen bij FIXED]
 
-<!-- known-issues-synced-with-commit: dd35dfebd7d0bb89b38a77145a0b1d6000a8d661 -->
+
+## KI-002: Restbevindingen Codex-security-review messenger (2 medium, 2 low, 2 betterments)
+
+- **Ontdekt**: 2026-09-04
+- **Type**: vuln
+- **Severity**: medium (hoogste in de bundel)
+- **Bron**: Codex security-review (route A, `--mode security`, model `gpt-daybreak-blue-latest`, effort `ultra`, geattesteerd), gedraaid op de messenger-aanvalsoppervlakte tijdens TASK-001. Run-uniek rapport buiten git: `~/.claude/state/codex-reviews/1788492427-14454/codex-review.md` (0600).
+- **Component**: `csf/messenger/index.recaptcha.html`, `csf/messenger/index.php`, `csf/ConfigServer/Messenger.pm`
+- **Omschrijving**: verzamel-entry voor de bevindingen uit die review die NIET in 16.31 zijn opgelost, conform de security-review-conventie (high/critical elk een eigen entry, medium/low gebundeld met telling). De review gaf verdict DO-NOT-SHIP; de drie zwaarste bevindingen (P0 CGI-mapping van `/usr/bin`, P1 symlink-clobber op `recaptcha.php`, P1 TLS-verificatie uit bij reCAPTCHA-verify) zijn wel opgelost in deze release. Wat openblijft:
+  - **2x medium**: (a) de unblock-token is niet gebonden aan de peer die de CAPTCHA oploste en reist over platte HTTP wanneer de HTML-messenger aanstaat, zodat een on-path partij hem kan onderscheppen en racen; (b) er is geen rate-limiting op de anonieme verify-aanroep. Van (b) is de stall-helft in deze release wel afgedekt met connect- en totaal-timeouts (commit 62fd918); de ontbrekende helft is het aantal aanroepen per bron.
+  - **2x low**: onder `DEBUG` belanden runtime-details in de HTTP-respons, en de door de client gekozen request-regel wordt verbatim gelogd (controltekens plus de CAPTCHA-token in het log).
+  - **2x betterment**: `index.php` en `index.recaptcha.php` leiden een include-pad af uit `HTTP_ACCEPT_LANGUAGE`, en twee plekken in `Messenger.pm` behandelen csf-configwaarden als commandotekst. Beide vereisen een voorwaarde die op een correct opgezette host niet geldt.
+- **Waarom niet nu opgelost**: (a) vraagt een ontwerpwijziging (server-side nonce plus `remoteip`-binding en HTTPS-only unblock), geen regelfix, en raakt het unblock-protocol zelf; de rest is bewust buiten de scope van een pariteitsrelease gehouden. Alles hierboven is bovendien alleen bereikbaar wanneer `MESSENGER` aanstaat, en die staat in elke meegeleverde `csf.*.conf` op `0`.
+- **Status**: OPEN
+- **Next-step**: eigen sessie. Begin bij de medium (a): bind de verificatie aan de peer met een eenmalige server-nonce plus de `remoteip`-parameter van de siteverify-aanroep, en bied unblock alleen over HTTPS aan. Daarna (b) rate-limiting per bron-IP. De low-items zijn een aparte, kleinere ronde. Lees het run-unieke rapport voor de exploit-details; die staan bewust niet in dit register.
+- **Vastgelegd in commit**: [hash, alleen bij FIXED]
+<!-- known-issues-synced-with-commit: 406b462842b351fbbe41fb5af35b4470af53c76d -->
