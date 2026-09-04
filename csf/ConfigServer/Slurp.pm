@@ -38,7 +38,21 @@ our $VERSION     = 1.02;
 our @ISA         = qw(Exporter);
 our @EXPORT_OK   = qw(slurp);
 
-our $slurpreg = qr/(?>\x0D\x0A?|[\x0A-\x0C\x85\x{2028}\x{2029}])/;
+# Record separator for every csf configuration file. Deliberately byte
+# oriented: slurp() returns the raw bytes of the file without decoding them, so
+# a codepoint above 255 in this class makes the regex engine apply Unicode
+# rules to a byte string. With NEL (\x85) in the class that matched the second
+# byte of every UTF-8 sequence whose codepoint is congruent to 5 mod 64 --
+# U+0085, U+0105, U+0145 and so on all encode as <lead> 0x85 -- so a single
+# accented character in a csf.allow or csf.deny comment split the entry in two
+# and the tail was read back as a further entry. \x{2028} and \x{2029} carried
+# the same defect for their own byte sequences.
+#
+# The set kept here is the one the kernel, the shell and every editor actually
+# write: CRLF, CR, LF, VT and FF. valid_comment() in csf.pl guards written
+# comments against exactly this regex, so narrowing it here without narrowing
+# there would let a separator through that this parser still splits on.
+our $slurpreg = qr/(?>\x0D\x0A?|[\x0A-\x0C])/;
 our $cleanreg = qr/(\r)|(\n)|(^\s+)|(\s+$)/;
 
 # end main

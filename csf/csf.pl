@@ -1041,6 +1041,11 @@ sub doclusterdeny
 		return;
 	}
 
+	unless (valid_comment($comment)) {
+		print "cluster deny failed: the comment contains a record separator ".separator_name($comment)." and would append a further entry on every cluster member\n";
+		exit 1;
+	}
+
 	&clustersend("D $ip 1 * inout 3600 $comment");
 	return;
 }
@@ -1091,6 +1096,14 @@ sub doclustertempdeny
 	$comment 		=~ s/\-d\s*in//ig;
 	$comment 		=~ s/\-p\s*[\w\,\*\;]+//ig;
 	$comment 		=~ s/^\s*|\s*$//g;
+
+	# The trim above only reaches the ends; a separator in the middle survives
+	# it and would append an entry on every cluster member.
+	unless ( valid_comment( $comment ) )
+	{
+		print "cluster temp failed: the comment contains a record separator ".separator_name( $comment )." and would append a further entry on every cluster member\n";
+		exit 1;
+	}
 
 	if ( $comment eq "" ) 						{ $comment = "Manually added: " . iplookup( $ip ) }
 	if ( !length $timeout || $timeout < 2 ) 	{ $timeout = 3600 }
@@ -1145,6 +1158,11 @@ sub doclusterallow
 		return;
 	}
 
+	unless (valid_comment($comment)) {
+		print "cluster allow failed: the comment contains a record separator ".separator_name($comment)." and would append a further entry on every cluster member\n";
+		exit 1;
+	}
+
 	&clustersend( "A $ip 1 * inout 3600 $comment" );
 	return;
 }
@@ -1195,6 +1213,14 @@ sub doclustertempallow
 	$comment 		=~ s/\-d\s*in//ig;
 	$comment 		=~ s/\-p\s*[\w\,\*\;]+//ig;
 	$comment 		=~ s/^\s*|\s*$//g;
+
+	# The trim above only reaches the ends; a separator in the middle survives
+	# it and would append an entry on every cluster member.
+	unless ( valid_comment( $comment ) )
+	{
+		print "cluster temp failed: the comment contains a record separator ".separator_name( $comment )." and would append a further entry on every cluster member\n";
+		exit 1;
+	}
 
 	if ( $comment eq "" ) 						{ $comment = "Manually added: " . iplookup( $ip ) }
 	if ( !length $timeout || $timeout < 2 ) 	{ $timeout = 3600 }
@@ -2097,6 +2123,13 @@ sub doadd
 	my ($ip,$comment) = split (/\s/,$input{argument},2);
 	my $checkip = checkip(\$ip);
 
+	# Before anything is removed from csf.deny below: a refused comment must
+	# leave the firewall exactly as it was found.
+	unless (valid_comment($comment)) {
+		print "add failed: the comment contains a record separator ".separator_name($comment)." and would append a further csf.allow entry\n";
+		exit 1;
+	}
+
 	&getethdev;
 
 	if ($ips{$ip} or $ipscidr->find($ip) or $ipscidr6->find($ip)) {
@@ -2180,6 +2213,11 @@ sub dodeny
 {
 	my ($ip,$comment) 	= split (/\s/,$input{argument},2);
 	my $checkip 		= checkip(\$ip);
+
+	unless (valid_comment($comment)) {
+		print "deny failed: the comment contains a record separator ".separator_name($comment)." and would append a further csf.deny entry\n";
+		exit 1;
+	}
 
 	&getethdev;
 
@@ -4095,6 +4133,58 @@ sub crontab {
 }
 # end crontab
 ###############################################################################
+# start valid_comment
+#
+# Whether a comment may be written into csf.allow, csf.deny, csf.tempban or
+# csf.tempallow.
+#
+# Those files are read back one entry per record, so a record separator inside
+# a comment does not corrupt the entry it belongs to -- it appends a further
+# one, and that appended entry is a whole rule with every field chosen by
+# whoever supplied the comment. Anyone who can reach a comment field but not a
+# rule field therefore gets to write a rule: a reseller through the reseller
+# UI, or an operator-facing form that validates the address and passes the
+# comment through untouched.
+#
+# Anchored on $slurpreg rather than on a [\r\n] of its own, so that the guard
+# cannot drift away from the parser it guards: $slurpreg also carries VT and
+# FF, either of which defeats [\r\n] and still splits the record.
+#
+# Refused rather than stripped. A comment is free text, and silently rewriting
+# what an operator typed is its own source of surprise; a refusal is visible
+# and leaves the operator's own text intact to correct.
+sub valid_comment {
+	my $comment = shift;
+	return 1 unless defined $comment;
+	return $comment =~ m{$slurpreg} ? 0 : 1;
+}
+# end valid_comment
+###############################################################################
+# start separator_name
+#
+# Names the separator that made valid_comment() refuse, so the refusal message
+# points at a byte the operator usually cannot see in their own input. Reads
+# the same $slurpreg as the guard, so a separator the table does not know about
+# is reported as "unknown" rather than as the wrong name.
+sub separator_name {
+	my $comment = shift;
+	return "" unless defined $comment;
+	return "" unless $comment =~ m{($slurpreg)};
+
+	my $found = $1;
+	my %name = (
+		"\x0A"     => "LF",
+		"\x0D"     => "CR",
+		"\x0D\x0A" => "CRLF",
+		"\x0B"     => "VT",
+		"\x0C"     => "FF",
+	);
+	my $bytes = join(" ", map {sprintf("0x%02X", ord $_)} split(//, $found));
+
+	return "(".($name{$found} // "unknown").", $bytes)";
+}
+# end separator_name
+###############################################################################
 # start error
 sub error {
 	my $line = shift;
@@ -5314,6 +5404,15 @@ sub dotempdeny
 	$comment =~ s/\-d\s*in//ig;
 	$comment =~ s/\-p\s*[\w\,\*\;]+//ig;
 	$comment =~ s/^\s*|\s*$//g;
+
+	# csf.tempban is one record per line, so a separator here appends a record
+	# whose every field -- address, port, direction, duration -- is chosen by
+	# whoever supplied the comment.
+	unless (valid_comment($comment)) {
+		print "temp deny failed: the comment contains a record separator ".separator_name($comment)." and would append a further csf.tempban entry\n";
+		exit 1;
+	}
+
 	if ( $comment eq "" ) {$comment = "Manually added: ".iplookup($ip)}
 
 	my @deny = slurp("/etc/csf/csf.deny");
@@ -5455,7 +5554,13 @@ sub dotempallow
 	$comment 		=~ s/\-d\s*in//ig;
 	$comment 		=~ s/\-p\s*[\w\,\*\;]+//ig;
 	$comment 		=~ s/^\s*|\s*$//g;
-	
+
+	unless ( valid_comment( $comment ) )
+	{
+		print "temp allow failed: the comment contains a record separator ".separator_name( $comment )." and would append a further csf.tempallow entry\n";
+		exit 1;
+	}
+
 	if ( $comment eq "" ) { $comment = "Manually added: " . iplookup( $ip ) }
 
 	my @allow = slurp( "/etc/csf/csf.allow" );
