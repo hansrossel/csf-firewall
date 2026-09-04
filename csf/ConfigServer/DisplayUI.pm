@@ -340,6 +340,12 @@ sub main
 				next
 			}
 			my ($time,$ip,$port,$inout,$timeout,$message) = split(/\|/,$line);
+			# Every field here was written by lfd, and the comment carries
+			# text lfd took from whatever it was reading -- a log line, a
+			# username, a request. Stored markup would otherwise run in this
+			# page. $time is not escaped: it is replaced below by a number
+			# this code computes.
+			$_ = html_escape($_) for ($ip, $port, $inout, $message);
 			$time = $timeout - (time - $time);
 			if ($port eq "")
 			{
@@ -387,6 +393,12 @@ sub main
 			}
 
 			my ($time,$ip,$port,$inout,$timeout,$message) = split(/\|/,$line);
+			# Every field here was written by lfd, and the comment carries
+			# text lfd took from whatever it was reading -- a log line, a
+			# username, a request. Stored markup would otherwise run in this
+			# page. $time is not escaped: it is replaced below by a number
+			# this code computes.
+			$_ = html_escape($_) for ($ip, $port, $inout, $message);
 			$time = $timeout - (time - $time);
 			if ($port eq "")
 			{
@@ -2428,12 +2440,12 @@ EOD
 
 			if ( $iptables[0] =~ /\|(\S+\s+\d+\s+\S+)/)
 			{
-				$from = $1
+				$from = html_escape($1)
 			}
-	
+
 			if ( $iptables[-1] =~ /\|(\S+\s+\d+\s+\S+)/)
 			{
-				$to = $1
+				$to = html_escape($1)
 			}
 
 			print "<div class='pull-right'><button type='button' class='btn btn-primary glyphicon glyphicon-arrow-down' data-tooltip='tooltip' title='Expand All' onClick='\$(\".submenu\").show();'></button>\n";
@@ -2464,6 +2476,15 @@ EOD
 				if ( $log =~ /DPT=(\d+)/) {$dpt = $1}
 				if ( $log =~ /PROTO=(\S+)/) {$proto = $1}
 
+				# Escape before the <br> insertion below, which is markup this
+				# code adds on purpose and must survive. \S+ admits <, > and
+				# quotes, and $text is a resolved description -- reverse DNS
+				# for an address its owner controls -- so it is the field an
+				# attacker can actually choose. $spt and $dpt matched \d+ and
+				# need nothing. The detail row further down already escapes
+				# $log; this summary row did not.
+				$_ = html_escape($_) for ($text, $in, $out, $src, $dst, $proto);
+
 				if ( $text ne "" )
 				{
 					$text =~ s/\(/\<br\>\(/g;
@@ -2479,7 +2500,7 @@ EOD
 		
 				if ( $log =~ /^(\S+\s+\d+\s+\S+)/)
 				{
-					$time = $1
+					$time = html_escape($1)
 				}
 
 				$inout = "n/a";
