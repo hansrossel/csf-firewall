@@ -37,6 +37,9 @@ use IO::Socket::INET;
 use Net::CIDR::Lite;
 use Net::IP;
 use IPC::Open3;
+# Imported with an empty list: POSIX exports several hundred names by default
+# and this module only needs setuid/setgid, called fully qualified.
+use POSIX ();
 use ConfigServer::Config;
 use ConfigServer::CheckIP qw(checkip);
 use ConfigServer::Logger qw(logfile);
@@ -335,12 +338,10 @@ sub messenger {
 	{
 		my (undef,undef,$uid,$gid,undef,undef,undef,$homedir) = getpwnam($user);
 		if (($uid > 0) and ($gid > 0)) {
-			local $( = $gid;
-			local $) = "$gid $gid";
-			local $> = local $< = $uid;
-			if (($) != $gid) or ($> != $uid) or ($( != $gid) or ($< != $uid))
+			my $dropfailure = &dropprivileges($uid, $gid);
+			if (defined $dropfailure)
 			{
-				logfile("MESSENGER_USER unable to drop privileges - stopping $oldtype Messenger");
+				logfile("MESSENGER_USER unable to drop privileges ($dropfailure) - stopping $oldtype Messenger");
 				exit;
 			}
 
@@ -555,6 +556,17 @@ sub messengerv2 {
 	}
 	system("chmod","711",$homedir);
 	my $public_html = $homedir."/public_html";
+	# "nobody" is a name, and a name is whatever /etc/group says it is. On a
+	# host where it has been pointed at gid 0, this chown would hand the
+	# document root to the root group. MESSENGERV3 settles the same question
+	# from MESSENGERV3GROUP at the same point.
+	my $public_gid = &resolvegroup("nobody");
+	if (!defined $public_gid) {
+		return (2, "The nobody group does not exist");
+	}
+	if ($public_gid == 0) {
+		return (2, "The nobody group must not resolve to the root group (gid 0)");
+	}
 	unless (-e $public_html) {
 		system("mkdir","-p",$public_html);
 		system("chown","$config{MESSENGER_USER}:nobody",$public_html);
@@ -813,6 +825,13 @@ sub messengerv3 {
 		return (1, "The home directory for $config{MESSENGER_USER} does not exist [$homedir]");
 	}
 	my $public_html = $homedir."/public_html";
+	my $public_gid = &resolvegroup($config{MESSENGERV3GROUP});
+	if (!defined $public_gid) {
+		return (3, "MESSENGERV3GROUP [".($config{MESSENGERV3GROUP} // "")."] is not a valid group name or gid");
+	}
+	if ($public_gid == 0) {
+		return (3, "MESSENGERV3GROUP [".($config{MESSENGERV3GROUP} // "")."] must not resolve to the root group (gid 0)");
+	}
 	unless (-e $public_html) {
 		system("mkdir","-p",$public_html);
 		system("chown","$config{MESSENGER_USER}:$config{MESSENGERV3GROUP}",$public_html);
@@ -1112,6 +1131,118 @@ EOF
 # end messengerv3
 ###############################################################################
 # start messengerlog
+###############################################################################
+# start resolvegroup
+#
+# Resolve a configured group to a gid, so the messenger can refuse a document
+# root owned by the root group before it creates one. Returns undef when the
+# value names no group.
+#
+# Accepts a name or a bare numeric gid, because both forms work in the chown
+# that follows and both therefore have to be checked. A literal is not the only
+# way gid 0 arrives: getgrnam() reads /etc/group, so a host that has pointed
+# "nobody" at gid 0 reaches the same place through a name that looks harmless.
+#
+# A numeric value is bounded before it is believed. Outside the range a gid can
+# hold, the kernel truncates on the way in and the value that lands is not the
+# value that was checked -- 4294967296 arrives as 0.
+sub resolvegroup {
+	my $group = shift;
+
+	return undef if (!defined $group);
+	$group =~ s/^\s+|\s+$//g;
+	return undef if ($group eq "");
+
+	if ($group =~ /^\d+$/) {
+		return undef if ($group > 0xFFFFFFFE);
+		return $group + 0;
+	}
+
+	my $gid = getgrnam($group);
+
+	return defined $gid ? $gid + 0 : undef;
+}
+# end resolvegroup
+###############################################################################
+# start dropprivileges
+#
+# Permanently drop the v1 messenger to MESSENGER_USER before it serves
+# anything. Returns undef once the drop has been verified, and otherwise a
+# short reason for the caller to log before it stops the messenger.
+#
+# Assigning to $< / $> / $( / $) changes only the real and effective ids: the
+# saved set-user-ID and set-group-ID stay at 0, so a single "$> = 0" anywhere
+# in the request handler restores full root (CWE-273). The previous code did
+# exactly that, and did it through "local", which by construction means the
+# drop was reversible -- Perl restores those values on scope exit, which it
+# could only do because the saved ids were still privileged. The handler this
+# protects parses an attacker-supplied HTTP request line and a reCAPTCHA
+# response fetched from the network, so the drop has to be irreversible.
+#
+# setgid(2) and setuid(2) set the real, effective and saved id together when
+# called with an effective uid of 0, which is what makes it permanent. Order
+# matters and cannot be rearranged: the supplementary groups have to go first
+# because setgroups(2) needs privilege, and the uid has to go last because
+# after it drops there is no privilege left to change the gid.
+sub dropprivileges {
+	my ($uid, $gid) = @_;
+
+	my $failure;
+	eval {
+		local $SIG{__DIE__} = undef;
+		# Assigning a list to $) calls setgroups(2), replacing the
+		# supplementary groups with just $gid. Left alone, a root
+		# supplementary group survives a correct uid/gid drop and every id
+		# still reads back as dropped.
+		$) = "$gid $gid";
+		$( = $gid;
+		POSIX::setgid($gid);
+		POSIX::setuid($uid);
+		1;
+	} or do {
+		$failure = $@ || "unknown error";
+		$failure =~ s/\n.*\z//s;
+		$failure =~ s/\s+\z//;
+		return "the drop itself failed: ".($failure ne "" ? $failure : "no reason was reported");
+	};
+
+	return "the ids do not read back as dropped" if ($< != $uid or $> != $uid or $( != $gid or $) != $gid);
+
+	# The saved ids are what make the drop permanent, and Perl cannot read
+	# them, so they come from the kernel. Read with a plain open rather than
+	# through slurp(): this is the verification step of a security control and
+	# should not depend on an indirection another part of the process could
+	# redirect. Fail closed on anything unreadable or unparsable -- if the drop
+	# cannot be proven, the messenger must not serve.
+	my %ids;
+	unless (open (my $STATUS, "<", "/proc/self/status")) {
+		return "cannot read /proc/self/status to verify the saved ids";
+	} else {
+		while (my $line = <$STATUS>) {
+			if ($line =~ /^(Uid|Gid):\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/) {$ids{$1} = $4}
+			if ($line =~ /^Groups:\s*(.*?)\s*$/) {$ids{Groups} = $1}
+		}
+		close ($STATUS);
+	}
+
+	return "the saved uid is not $uid" if (!defined $ids{Uid} or $ids{Uid} != $uid);
+	return "the saved gid is not $gid" if (!defined $ids{Gid} or $ids{Gid} != $gid);
+
+	# A surviving root supplementary group leaves the process holding group 0
+	# with every id above still reading back correctly, and neither $( nor $)
+	# shows it because numifying them yields their first field only. setgroups
+	# installed exactly $gid, so that is what passes -- as does an empty list,
+	# which some kernels and container configurations report instead and which
+	# is strictly more restrictive. Anything else fails closed, a missing
+	# Groups line included, because then there is nothing to verify against.
+	return "the supplementary groups were not dropped" if (!defined $ids{Groups});
+	my @groups = grep {$_ ne ""} split(/\s+/, $ids{Groups});
+	return "the supplementary groups were not dropped" if (scalar @groups > 1);
+	return "the supplementary groups were not dropped" if (scalar @groups == 1 and $groups[0] != $gid);
+
+	return;
+}
+# end dropprivileges
 ###############################################################################
 # start messengervhostsec
 #
