@@ -239,19 +239,31 @@ m1hngnebTLMxlxQ8W6k4u5zzZHp7+H9AvfLOjcU5DwAAAABJRU5ErkJggg==" />
 				curl_setopt($verify, CURLOPT_URL, "https://www.google.com/recaptcha/api/siteverify");
 				curl_setopt($verify, CURLOPT_POST, true);
 				curl_setopt($verify, CURLOPT_POSTFIELDS, http_build_query($data));
-				curl_setopt($verify, CURLOPT_SSL_VERIFYPEER, false);
+				// This response decides whether an address gets unblocked, so
+				// it has to come from Google and not from whoever is between
+				// us and Google. With VERIFYPEER off, an on-path attacker
+				// could return their own "success" and queue their own
+				// address. VERIFYHOST 2 additionally requires the certificate
+				// to be for this host, which VERIFYPEER alone does not check.
+				curl_setopt($verify, CURLOPT_SSL_VERIFYPEER, true);
+				curl_setopt($verify, CURLOPT_SSL_VERIFYHOST, 2);
+				// Anonymous requests reach this call, so a stalled connection
+				// must not hold a worker open indefinitely.
+				curl_setopt($verify, CURLOPT_CONNECTTIMEOUT, 10);
+				curl_setopt($verify, CURLOPT_TIMEOUT, 15);
 				curl_setopt($verify, CURLOPT_RETURNTRANSFER, true);
 				$verifyResponse = curl_exec($verify);
 				$responseData = json_decode($verifyResponse);
 				if($responseData->success) {
 					if ($responseData->hostname == $_SERVER['SERVER_NAME']) {
 						$alert = 'success';
-						$message = $lang["recaptcha success"] . "<br /><a href='" . $_SERVER['REQUEST_URI'] . "'>" . $_SERVER['REQUEST_URI'] . "</a>";
+						$safeuri = htmlspecialchars($_SERVER['REQUEST_URI'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+						$message = $lang["recaptcha success"] . "<br /><a href='" . $safeuri . "'>" . $safeuri . "</a>";
 						file_put_contents($unblockfile, $_SERVER['REMOTE_ADDR'].";".$_SERVER['SERVER_NAME'].";".$_SERVER['SERVER_ADDR']."\n", FILE_APPEND | LOCK_EX);
 						file_put_contents($logfile,$date . "*Success*, ReCaptcha (" . $_SERVER['REMOTE_ADDR'].": [".$_SERVER['SERVER_NAME']." (".$_SERVER['SERVER_ADDR'].")] requested unblock\n", FILE_APPEND | LOCK_EX);
 					} else {
 						$alert = "danger";
-						$message = $lang["recaptcha hostfail"] . ' ['.$responseData->hostname.' != '.$_SERVER['SERVER_NAME'].']';
+						$message = $lang["recaptcha hostfail"] . ' ['.htmlspecialchars((string) $responseData->hostname, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8').' != '.htmlspecialchars($_SERVER['SERVER_NAME'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8').']';
 						file_put_contents($logfile,$date . "*Failed*, ReCaptcha (" . $_SERVER['REMOTE_ADDR'].": [".$_SERVER['SERVER_NAME']." (".$_SERVER['SERVER_ADDR'].")] does not appear to be hosted on this server\n", FILE_APPEND | LOCK_EX);
 					}
 				} else {

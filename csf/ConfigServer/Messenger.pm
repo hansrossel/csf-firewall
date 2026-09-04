@@ -562,10 +562,10 @@ sub messengerv2 {
 	# from MESSENGERV3GROUP at the same point.
 	my $public_gid = &resolvegroup("nobody");
 	if (!defined $public_gid) {
-		return (2, "The nobody group does not exist");
+		return (1, "The nobody group does not exist");
 	}
 	if ($public_gid == 0) {
-		return (2, "The nobody group must not resolve to the root group (gid 0)");
+		return (1, "The nobody group must not resolve to the root group (gid 0)");
 	}
 	unless (-e $public_html) {
 		system("mkdir","-p",$public_html);
@@ -605,16 +605,10 @@ sub messengerv2 {
 		system("chown","$config{MESSENGER_USER}:$config{MESSENGER_USER}",$homedir."/en.php");
 		system("chmod","644",$homedir."/en.php");
 	}
-	open (my $CONF, ">", $homedir."/recaptcha.php");
-	flock ($CONF, LOCK_EX);
-	print $CONF "<?php\n";
-	print $CONF "\$secret = '$config{RECAPTCHA_SECRET}';\n";
-	print $CONF "\$sitekey = '$config{RECAPTCHA_SITEKEY}';\n";
-	print $CONF "\$unblockfile = '$homedir/unblock.txt';\n";
-	print $CONF "\$logfile = '/var/log/lfd_messenger.log';\n";
-	print $CONF "?>\n";
-	system("chown","$config{MESSENGER_USER}:$config{MESSENGER_USER}",$homedir."/recaptcha.php");
-	system("chmod","600",$homedir."/recaptcha.php");
+	my $recaptchafailure = &writerecaptchaconf($homedir, $uid, $gid);
+	if (defined $recaptchafailure) {
+		return (1, $recaptchafailure);
+	}
 
 	
 	open (my $OUT, ">", "/var/lib/csf/csf.conf");
@@ -827,10 +821,10 @@ sub messengerv3 {
 	my $public_html = $homedir."/public_html";
 	my $public_gid = &resolvegroup($config{MESSENGERV3GROUP});
 	if (!defined $public_gid) {
-		return (3, "MESSENGERV3GROUP [".($config{MESSENGERV3GROUP} // "")."] is not a valid group name or gid");
+		return (1, "MESSENGERV3GROUP [".($config{MESSENGERV3GROUP} // "")."] is not a valid group name or gid");
 	}
 	if ($public_gid == 0) {
-		return (3, "MESSENGERV3GROUP [".($config{MESSENGERV3GROUP} // "")."] must not resolve to the root group (gid 0)");
+		return (1, "MESSENGERV3GROUP [".($config{MESSENGERV3GROUP} // "")."] must not resolve to the root group (gid 0)");
 	}
 	unless (-e $public_html) {
 		system("mkdir","-p",$public_html);
@@ -866,16 +860,10 @@ EOF
 		system("chown","$config{MESSENGER_USER}:$config{MESSENGER_USER}",$homedir."/en.php");
 		system("chmod","644",$homedir."/en.php");
 	}
-	open (my $CONF, ">", $homedir."/recaptcha.php");
-	flock ($CONF, LOCK_EX);
-	print $CONF "<?php\n";
-	print $CONF "\$secret = '$config{RECAPTCHA_SECRET}';\n";
-	print $CONF "\$sitekey = '$config{RECAPTCHA_SITEKEY}';\n";
-	print $CONF "\$unblockfile = '$homedir/unblock.txt';\n";
-	print $CONF "\$logfile = '/var/log/lfd_messenger.log';\n";
-	print $CONF "?>\n";
-	system("chown","$config{MESSENGER_USER}:$config{MESSENGER_USER}",$homedir."/recaptcha.php");
-	system("chmod","600",$homedir."/recaptcha.php");
+	my $recaptchafailure = &writerecaptchaconf($homedir, $uid, $gid);
+	if (defined $recaptchafailure) {
+		return (1, $recaptchafailure);
+	}
 
 	if ($config{MESSENGERV3WEBSERVER} eq "apache") {
 		$webserver = "apache";
@@ -1131,6 +1119,55 @@ EOF
 # end messengerv3
 ###############################################################################
 # start messengerlog
+###############################################################################
+# start writerecaptchaconf
+#
+# Write MESSENGER_USER's recaptcha.php, which carries RECAPTCHA_SECRET.
+# Returns undef on success, or a reason for the caller to return.
+#
+# lfd runs this as root, and the file sits in MESSENGER_USER's own home
+# directory, so that account can replace the path with a symlink between runs.
+# A plain open(">") would follow it: root would truncate whatever it points
+# at, write the reCAPTCHA secret into it, and then chown and chmod the target
+# to MESSENGER_USER. Any root-writable file on the host is reachable that way.
+#
+# Unlink first, which removes a symlink rather than following it, then create
+# with O_EXCL|O_NOFOLLOW so that anything re-created in the gap loses the race
+# instead of winning it. Ownership and mode are set through the open
+# descriptor, not the path, so they cannot be redirected either. This is the
+# same shape as _open_unblock_queue() in lfd.pl, which guards the queue file
+# in the same directory against the same account.
+sub writerecaptchaconf {
+	my ($homedir, $uid, $gid) = @_;
+	my $path = $homedir."/recaptcha.php";
+
+	unlink($path);
+
+	my $CONF;
+	unless (sysopen ($CONF, $path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600)) {
+		return "Unable to create [$path] safely: $!";
+	}
+	flock ($CONF, LOCK_EX);
+
+	# Through the descriptor: the path could be swapped between here and the
+	# open, the open file cannot.
+	unless (chmod (0600, $CONF) and chown ($uid, $gid, $CONF)) {
+		close ($CONF);
+		unlink($path);
+		return "Unable to set the owner and mode on [$path]: $!";
+	}
+
+	print $CONF "<?php\n";
+	print $CONF "\$secret = '$config{RECAPTCHA_SECRET}';\n";
+	print $CONF "\$sitekey = '$config{RECAPTCHA_SITEKEY}';\n";
+	print $CONF "\$unblockfile = '$homedir/unblock.txt';\n";
+	print $CONF "\$logfile = '/var/log/lfd_messenger.log';\n";
+	print $CONF "?>\n";
+	close ($CONF);
+
+	return;
+}
+# end writerecaptchaconf
 ###############################################################################
 # start resolvegroup
 #
