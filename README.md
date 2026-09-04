@@ -62,6 +62,13 @@ Added for parity with cPanel CSF 16.31, the release carrying CVE-2026-67402:
 | Allow/deny/temp comments refused when they carry a record separator | `csf/csf.pl` |
 | Temporary IP entries and iptables log fields escaped in the UI | `csf/ConfigServer/DisplayUI.pm` |
 
+Backports for the older 16.x security releases are NOT complete. 16.22
+(unblock-queue symlink) and 16.23 (URLGet command injection, secret
+redaction) are covered; 16.26 (messenger file generation) was taken over only
+in part, and 16.09 (PERL5LIB) not at all. See `docs/project/known-issues.md`,
+KI-003 and KI-004. Do not read "16.31" as parity with every security fix
+cPanel shipped in the 16.x line.
+
 Three items in cPanel's 16.31 release notes have no counterpart here, each for
 a checked reason rather than an assumed one:
 
