@@ -8,8 +8,24 @@ Listen [::]:[SSLPORT]
 	DocumentRoot [DOCUMENTROOT]
 	UseCanonicalName Off
 	KeepAlive Off
+	<IfModule userdir_module>
+		UserDir disabled
+	</IfModule>
 	<Directory "[DIRECTORY]">
-		AllowOverride All
+		AllowOverride None
+		Options -ExecCGI -Includes -IncludesNOEXEC -Indexes -MultiViews -FollowSymLinks +SymLinksIfOwnerMatch
+	</Directory>
+	<Directory "[DOCUMENTROOT]">
+		AllowOverride None
+		Options -ExecCGI -Includes -IncludesNOEXEC -Indexes -MultiViews -FollowSymLinks +SymLinksIfOwnerMatch
+		Require all granted
+		DirectoryIndex index.php index.html index.htm
+		<IfModule mod_rewrite.c>
+			RewriteEngine On
+			RewriteCond %{REQUEST_FILENAME} !-f
+			RewriteCond %{REQUEST_FILENAME} !-d
+			RewriteRule ^ /index.php [L,QSA]
+		</IfModule>
 	</Directory>
 	<IfModule suphp_module>
 		suPHP_Engine On
@@ -30,7 +46,6 @@ Listen [::]:[SSLPORT]
 	<IfModule mod_lsapi.c>
 		lsapi_user_group [USER] [USER]
 	</IfModule>
-	ScriptAlias /local-bin /usr/bin
 	<FilesMatch "\.(inc|php)$">
 		[PHPHANDLER]
 	</FilesMatch>

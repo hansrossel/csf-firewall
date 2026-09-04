@@ -565,7 +565,13 @@ sub messengerv2 {
 		flock ($HTACCESS, LOCK_EX);
 		print $HTACCESS "Require all granted\n";
 		print $HTACCESS "DirectoryIndex index.php index.cgi index.html index.htm\n";
-		print $HTACCESS "Options +FollowSymLinks +ExecCGI\n";
+		# No "Options +FollowSymLinks +ExecCGI": the unblock page is static
+		# plus one PHP script and needs neither, while this directory is
+		# writable by MESSENGER_USER. messengervhostsec() now sets
+		# AllowOverride None, so this file is inert in any case; the line is
+		# gone rather than merely overridden so that a host which grants
+		# overrides elsewhere does not pick it back up. MESSENGERV3 has
+		# carried it commented out for the same reason.
 		print $HTACCESS "RewriteEngine On\n";
 		print $HTACCESS "RewriteCond \%{REQUEST_FILENAME} !-f\n";
 		print $HTACCESS "RewriteCond \%{REQUEST_FILENAME} !-d\n";
@@ -608,9 +614,7 @@ sub messengerv2 {
 		print $OUT "<VirtualHost *:$config{MESSENGER_HTML}>\n";
 		print $OUT " ServerName $hostname\n";
 		print $OUT " DocumentRoot $public_html\n";
-		print $OUT " <Directory \"$homedir\">\n";
-		print $OUT "  AllowOverride All\n";
-		print $OUT " </Directory>\n";
+		print $OUT messengervhostsec($homedir, $public_html);
 		print $OUT " <IfModule suphp_module>\n";
 		print $OUT "   suPHP_UserGroup $config{MESSENGER_USER} $config{MESSENGER_USER}\n";
 		print $OUT " </IfModule>\n";
@@ -697,9 +701,7 @@ sub messengerv2 {
 			print $OUT " ServerName $hostname\n";
 			print $OUT " DocumentRoot $public_html\n";
 			print $OUT " UseCanonicalName Off\n";
-			print $OUT " <Directory \"$homedir\">\n";
-			print $OUT "  AllowOverride All\n";
-			print $OUT " </Directory>\n";
+			print $OUT messengervhostsec($homedir, $public_html);
 			print $OUT " <IfModule suphp_module>\n";
 			print $OUT "   suPHP_UserGroup $config{MESSENGER_USER} $config{MESSENGER_USER}\n";
 			print $OUT " </IfModule>\n";
@@ -737,9 +739,7 @@ sub messengerv2 {
 				print $OUT " ServerAlias $ssldomains{$key}{aliases}\n";
 				print $OUT " DocumentRoot $public_html\n";
 				print $OUT " UseCanonicalName Off\n";
-				print $OUT " <Directory \"$homedir\">\n";
-				print $OUT "  AllowOverride All\n";
-				print $OUT " </Directory>\n";
+				print $OUT messengervhostsec($homedir, $public_html);
 				print $OUT " <IfModule suphp_module>\n";
 				print $OUT "   suPHP_UserGroup $config{MESSENGER_USER} $config{MESSENGER_USER}\n";
 				print $OUT " </IfModule>\n";
@@ -1112,6 +1112,53 @@ EOF
 # end messengerv3
 ###############################################################################
 # start messengerlog
+###############################################################################
+# start messengervhostsec
+#
+# The per-vhost security block for the MESSENGERV2 configuration, matching what
+# apache.http.txt and apache.https.txt state for MESSENGERV3.
+#
+# The messenger document root is served to anonymous clients that the firewall
+# has blocked, so the vhost must hand them nothing beyond the unblock page.
+# Left as it was, the vhost granted "AllowOverride All" over MESSENGER_USER's
+# home, which put every one of these decisions in a .htaccess that
+# MESSENGER_USER can rewrite -- and the .htaccess csf itself wrote there asked
+# for "+FollowSymLinks +ExecCGI", so CGI execution and symlink following were
+# on by default in a directory that account controls.
+#
+# Because AllowOverride None makes any .htaccess inert, the three directives
+# that file legitimately carried -- the access grant, the index list and the
+# front controller rewrite -- are stated here instead, so the unblock page
+# keeps working.
+sub messengervhostsec {
+	my ($homedir, $public_html) = @_;
+	my $options = "Options -ExecCGI -Includes -IncludesNOEXEC -Indexes -MultiViews -FollowSymLinks +SymLinksIfOwnerMatch";
+
+	my $text = "";
+	$text .= " <IfModule userdir_module>\n";
+	$text .= "  UserDir disabled\n";
+	$text .= " </IfModule>\n";
+	$text .= " <Directory \"$homedir\">\n";
+	$text .= "  AllowOverride None\n";
+	$text .= "  $options\n";
+	$text .= " </Directory>\n";
+	$text .= " <Directory \"$public_html\">\n";
+	$text .= "  AllowOverride None\n";
+	$text .= "  $options\n";
+	$text .= "  Require all granted\n";
+	$text .= "  DirectoryIndex index.php index.html index.htm\n";
+	$text .= "  <IfModule mod_rewrite.c>\n";
+	$text .= "   RewriteEngine On\n";
+	$text .= "   RewriteCond %{REQUEST_FILENAME} !-f\n";
+	$text .= "   RewriteCond %{REQUEST_FILENAME} !-d\n";
+	$text .= "   RewriteRule ^ /index.php [L,QSA]\n";
+	$text .= "  </IfModule>\n";
+	$text .= " </Directory>\n";
+
+	return $text;
+}
+# end messengervhostsec
+###############################################################################
 sub messengerlog {
 	my $homedir = shift;
 	my $message = shift;

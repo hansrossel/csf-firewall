@@ -7,9 +7,10 @@ listener csf {
 # Virtualhost start - do not remove this line
 virtualHost csf {
 	vhRoot [DIRECTORY]
-	allowSymbolLink 1 
-	enableScript 1 
+	allowSymbolLink 0
+	enableScript 1
 	restrained 1
+	setUIDMode 2
 	docRoot [DOCUMENTROOT]
 }
 # Virtualhost end - do not remove this line
