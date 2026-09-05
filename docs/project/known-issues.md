@@ -112,4 +112,32 @@ vervang de placeholder-entry hieronder zodra een echt item wordt vastgelegd.
 - **Status**: OPEN
 - **Next-step**: eigen sessie. Statusdoorgifte eerst (dat is de wortel en vereist geen nieuwe plumbing), daarna de rollback als echte restore (bestaande conf opzij zetten voor de overschrijving, byte-identiek terugzetten bij falen) en tot slot `domessengerv2` de status laten opvangen met een niet-nul exit. Het v3-pad is lokaal echt testbaar omdat `MESSENGERV3TEST` en `MESSENGERV3LOCATION` configureerbaar zijn (stub-testcommando + tempdir); het v2-pad heeft `/usr/sbin/apachectl` hardgecodeerd en is daardoor zwakker te dekken.
 - **Vastgelegd in commit**: [hash, alleen bij FIXED]
+
+## KI-006: gekopieerde TLS-privesleutels van de messenger krijgen umask-permissies in plaats van 0600
+
+- **Ontdekt**: 2026-09-05
+- **Type**: vuln
+- **Severity**: medium-high (blootstelling van TLS-privesleutels aan elk lokaal account dat de directory kan doorlopen; verlaagd door de bereikbaarheidsvoorwaarde hieronder)
+- **Bron**: security-review van de messenger-aanvalsoppervlakte op HEAD, plus eigen hermeting in de code
+- **Component**: `csf/ConfigServer/Messenger.pm` - directory-aanmaak op regel 121-124 en 652-656, kopieeracties op regel 678, 728, 931, 1464 en 1516
+- **Omschrijving**: de messenger kopieert de TLS-certificaten en -sleutels die hij in de webserverconfiguratie vindt naar `/var/lib/csf/ssl/`. Gemeten op HEAD: die directory's worden aangemaakt met een kale `mkdir $ssldir."keys/"` zonder modus-argument, dus met `0777 & ~umask`, en de sleutels zelf gaan er met `File::Copy::copy()` in. `copy()` neemt de modus van de BRON niet over: het doelbestand krijgt de standaardmodus van het proces. Bij een gebruikelijke umask 022 landt een privesleutel daarmee als `0644` in een `0755`-directory, terwijl de bron doorgaans `0600` is. lfd draait als root, dus de umask is die van de daemon-omgeving en niet iets waar de beheerder per site controle over uitoefent.
+- **Impact**: elk lokaal account op de host kan de gekopieerde privesleutels lezen wanneer de umask dat toelaat. Dat is een sleutel voor een echt servercertificaat, niet voor het zelfondertekende UI-certificaat; hij blijft bruikbaar tot het certificaat vervangen is. Geen privilege-escalatie op zich, wel volledige compromittering van de TLS-identiteit die de messenger presenteert.
+- **Bereikbaarheid**: alleen wanneer `MESSENGER` aanstaat EN de HTTPS-messenger geconfigureerd is. `MESSENGER` staat op `0` in elke meegeleverde `csf.*.conf`.
+- **Status**: OPEN
+- **Next-step**: de directory's aanmaken met een expliciete `0700`, en de sleutelbestanden schrijven via een descriptor (`sysopen` met `O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW`, daarna `chmod`/`chown` OP de descriptor) in plaats van via `File::Copy::copy()` op pad. Dezelfde vorm die `writerecaptchaconf()` al gebruikt. Certificaten mogen `0644` blijven; alleen de `keys/`-tak vereist `0600`. Verifieer met een test die de umask op 022 zet en de resulterende modus assert.
+- **Vastgelegd in commit**: [hash, alleen bij FIXED]
+
+## KI-007: de TLS-handshake van de v1 HTTPS-messenger blokkeert de enige acceptor, vóór de fork en vóór de alarm
+
+- **Ontdekt**: 2026-09-05
+- **Type**: vuln
+- **Severity**: medium (ongeauthenticeerde denial of service op de deblokkeerdienst; verlaagd door de bereikbaarheidsvoorwaarde hieronder)
+- **Bron**: security-review van de messenger-aanvalsoppervlakte op HEAD, plus eigen hermeting in de code
+- **Component**: `csf/ConfigServer/Messenger.pm` - listener-constructie regel 245-268, `accept()` op regel 351, `fork` op regel 364, `alarm(10)` op regel 372
+- **Omschrijving**: de HTTPS-messenger construeert zijn luisteraar als een `IO::Socket::SSL` (regel 245-268). De acceptlus doet `while (my $client = $server->accept())` op regel 351, en `IO::Socket::SSL::accept()` voltooit standaard de volledige TLS-handshake vóór hij teruggeeft. Die handshake gebeurt dus in het OUDERPROCES, vóór de `fork` op regel 364 en dus ook vóór de `alarm(10)` die het kind op regel 372 arm. Een client die de TCP-verbinding opzet en de handshake nooit afmaakt, houdt daarmee de enige acceptor bezig; er is op dat moment nog geen kind waarop een timeout staat.
+- **Impact**: één ongeauthenticeerde verbinding legt de HTTPS-messenger stil voor alle andere geblokkeerde bezoekers. `MESSENGER_CHILDREN` (default 20) helpt hier niet tegen: die begrenst het aantal KINDEREN, en het probleem zit vóór de fork. Het effect is dat een aanvaller de deblokkeerroute kan dichtzetten, precies de dienst die een onterecht geblokkeerde bezoeker nodig heeft.
+- **Bereikbaarheid**: alleen wanneer `MESSENGER` aanstaat EN `MESSENGER_HTTPS_IN` niet leeg is. `MESSENGER` staat op `0` in elke meegeleverde `csf.*.conf`. Het HTML-pad (poort 8888) heeft dit niet: dat is een gewone `IO::Socket::INET` zonder handshake.
+- **Status**: OPEN
+- **Next-step**: rauw TCP accepteren en pas in het KIND de TLS-handshake doen, onder een deadline: `IO::Socket::SSL->start_SSL($client, SSL_startHandshake => 0, ...)` na de fork, met de bestaande `alarm` al gearmd. Let op dat de listener dan als gewone `IO::Socket::INET` geconstrueerd moet worden en de SSL-parameters naar `start_SSL` verhuizen; de SNI-certificaatkeuze uit `%sslcerts`/`%sslkeys` moet daarbij behouden blijven. Verifieer met een client die verbindt en niets stuurt: de acceptlus moet daarna nog een tweede verbinding aannemen.
+- **Vastgelegd in commit**: [hash, alleen bij FIXED]
 <!-- known-issues-synced-with-commit: 9270c5661070568652d5e53fb24c293bdcaf3283 -->
