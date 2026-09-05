@@ -4822,11 +4822,19 @@ sub doupdate
 
 			log_info( "Preparing to get newest CSF package${end}" );
 
+            # #
+            #   URLGET selects the client LIBRARY (1=HTTP::Tiny, 2=LWP,
+            #   3=CURL/WGET), not the scheme. The archive fetched here is
+            #   unpacked and its install.sh is executed as root a few lines
+            #   down, so the origin has to be authenticated by the transport.
+            #   This block used to rewrite the URL to plaintext http:// for
+            #   URLGET=1, which handed any on-path attacker root code execution
+            #   on every host running the automatic update (AUTO_UPDATES=1 is
+            #   the shipped default). A client that cannot negotiate TLS must
+            #   fail this download instead of silently downgrading it.
+            # #
+
             my $url = "https://$config{DOWNLOADSERVER}/csf.tgz";
-            if ( $config{URLGET} == 1 )
-            {
-                $url = "http://$config{DOWNLOADSERVER}/csf.tgz";
-            }
 
             if ( ( $config{SPONSOR_RELEASE_INSIDERS} // 0 ) == 1 && ( $config{SPONSOR_LICENSE} // '' ) ne '' )
             {
@@ -4840,11 +4848,38 @@ sub doupdate
 
             my ($status, $text) = $urlget->urlget( $url, "/usr/src/csf.tgz" );
 
-			log_info( "Downloading CSF update from ${bluel}${url}${end}" );
+            # #
+            #   Log the URL without its query string: the Insiders branch above
+            #   appends the sponsor license to it, and this line goes to both the
+            #   console and the log file.
+            # #
 
-            if (! -z "/usr/src/csf/csf.tgz")
+            my $logurl = $url;
+            $logurl =~ s/\?.*\z//s;
+
+			log_info( "Downloading CSF update from ${bluel}${logurl}${end}" );
+
+            # #
+            #   The download result used to be discarded, and the guard tested
+            #   /usr/src/csf/csf.tgz - a path urlget never writes to. Perl's -z
+            #   yields undef for a MISSING file, so "! -z" was true precisely
+            #   when the archive was absent: a failed or empty download still
+            #   reached tar and install.sh as root. Require a successful fetch
+            #   AND a non-empty archive at the path we actually downloaded to.
+            #   urlget returns (1, error) on failure and (0, file) on success.
+            # #
+
+            if ( $status )
             {
-				log_info( "Unpacking new CSF package ${bluel}/usr/src/csf/csf.tgz${end}" );
+				log_fail( "Update download failed, not installing: ${text}" );
+            }
+            elsif ( ! -s "/usr/src/csf.tgz" )
+            {
+				log_fail( "Update download produced no archive, not installing" );
+            }
+            else
+            {
+				log_info( "Unpacking new CSF package ${bluel}/usr/src/csf.tgz${end}" );
                 system("cd /usr/src ; tar -xzf csf.tgz ; cd csf ; sh install.sh");
 
 				log_info( "Performing housekeeping on temp files${end}" );
